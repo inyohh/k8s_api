@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ name }}
+  namespace: {{ namespace }}
+spec:
+  replicas: {{ replicas }}
+  selector:
+    matchLabels:
+      app: {{ name }}
+  template:
+    metadata:
+      labels:
+        app: {{ name }}
+    spec:
+      containers:
+      - name: {{ name }}
+        image: {{ image }}
+        ports:
+        - containerPort: {{ container_port }}
+        env:
+{% for k,v in env.items() %}
+        - name: {{ k }}
+          value: "{{ v }}"
+{% endfor %}
+        resources:
+          requests:
+            cpu: "{{ req_cpu }}"
+            memory: "{{ req_mem }}"
+          limits:
+            cpu: "{{ limit_cpu }}"
+            memory: "{{ limit_mem }}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ name }}-svc
+  namespace: {{ namespace }}
+spec:
+  type: NodePort
+  selector:
+    app: {{ name }}
+  ports:
+  - port: {{ service_port }}
+    targetPort: {{ container_port }}
+    nodePort: {{ node_port|default(omit) }}

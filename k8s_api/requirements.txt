@@ -1,4 +1,6 @@
-# fastapi
-# uvicorn[standard]
-# kubernetes
-# pydantic
+fastapi
+uvicorn[standard]
+kubernetes
+pydantic
+jinja2
+pyyaml

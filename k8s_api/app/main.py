@@ -1,27 +1,39 @@
-import sys
-import os
-# Ensure project root on path for absolute imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+import uvicorn
 from fastapi import FastAPI
-from app.routers.jobs import router as jobs_router
-from app.routers.batch_jobs import router as batch_jobs_router
-from app.routers.deployments import router as deployments_router
-from app.routers.batch_deployments import router as batch_deployments_router
-from app.routers.nodes import router as nodes_router
+from config import load_kube_config
+from routers import webapps
+from routers import databases
+from routers import jobs
+from fastapi.middleware.cors import CORSMiddleware
 
-# Create FastAPI app
-def create_app() -> FastAPI:
-    k8s_api = FastAPI(title="K8s API", version="v2")
-    k8s_api.include_router(jobs_router)
-    k8s_api.include_router(batch_jobs_router)
-    k8s_api.include_router(deployments_router)
-    k8s_api.include_router(batch_deployments_router)
-    k8s_api.include_router(nodes_router)
-    return k8s_api
+# ---------- 初始化 K8s 配置 ----------
+load_kube_config()
 
-k8s_api = create_app()
+# ---------- FastAPI 应用 ----------
+app = FastAPI(
+    title="Cluster Control API (K8s Edition)",
+    version="v1alpha1"
+)
 
+# 若有前端跨域需求：
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------- 挂载路由 ----------
+app.include_router(jobs.router)
+app.include_router(webapps.router)
+app.include_router(databases.router)
+
+# ---------- 启动 Uvicorn ----------
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:k8s_api", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=65516,
+        workers=4,
+        log_level="info"
+    )
