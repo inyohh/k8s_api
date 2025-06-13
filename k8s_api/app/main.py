@@ -4,6 +4,7 @@ from config import load_kube_config
 from routers import webapps
 from routers import databases
 from routers import jobs
+from routers import remote
 from fastapi.middleware.cors import CORSMiddleware
 
 # ---------- 初始化 K8s 配置 ----------
@@ -27,6 +28,7 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(webapps.router)
 app.include_router(databases.router)
+app.include_router(remote.router)
 
 # ---------- 启动 Uvicorn ----------
 if __name__ == "__main__":
