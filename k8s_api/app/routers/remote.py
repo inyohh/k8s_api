@@ -5,6 +5,8 @@ import paramiko
 from fastapi import APIRouter, HTTPException, Form, Query, Body
 from pydantic import BaseModel, Field
 from typing import Optional, List, Tuple
+from .device_database import update_to_mysql
+from datetime import datetime
 
 router = APIRouter(prefix="/v1alpha1/remote", tags=["RemoteOps"])
 
@@ -93,6 +95,14 @@ def clean_mode(req: DeviceRequest = Body(...)):
             raise HTTPException(500, f"Failed (exit {code}): {err or out}")
     finally:
         client.close()
+    # 写入数据库，包含clean所有信息
+    update_to_mysql(
+        device_name=req.device,
+        userinfo=None,
+        usage_info=None,
+        environment_purpose=None,
+        connect_info=None,
+    )
     return { "result": "Succeed" }
 
 
@@ -156,9 +166,17 @@ def ssh_to_dev(
         # 3) 获取 dev NodePort
         svc_dev = f"{req.device.lower()}-dc-proxy-svc"
         dev_port = get_nodeport(client, svc_dev)
-
-        # 4) 返回 ssh 命令
-        return {"ssh_dev": f"ssh -p {dev_port} root@{JUMP_HOST}"}
+        ssh_dev_cmd = f"ssh -p {dev_port} root@{JUMP_HOST}"
+        # 写入数据库，包含所有ssh信息
+        connect_info = f"ssh_dev: {ssh_dev_cmd}"
+        update_to_mysql(
+            device_name=req.device,
+            userinfo=req.userinfo,
+            usage_info="dev直连环境",
+            environment_purpose="",
+            connect_info=connect_info
+        )
+        return {"ssh_dev": ssh_dev_cmd}
     finally:
         client.close()
 
@@ -197,11 +215,20 @@ def ssh_to_env(
         env_svc = f"{req.device.lower()}-env-svc"
         dev_port = get_nodeport(client, dev_svc)
         env_port = get_nodeport(client, env_svc)
-
-        # 5) 返回 SSH 命令
+        ssh_dev_cmd = f"ssh -p {dev_port} root@{JUMP_HOST}"
+        ssh_env_cmd = f"ssh -p {env_port} user@{JUMP_HOST}"
+        # 写入数据库，包含所有ssh信息
+        connect_info = f"ssh_dev: {ssh_dev_cmd}; ssh_env: {ssh_env_cmd}"
+        update_to_mysql(
+            device_name=req.device,
+            userinfo=req.userinfo,
+            usage_info="env直连环境",
+            environment_purpose=req.env_config.purpose,
+            connect_info=connect_info
+        )
         return {
-            "ssh_dev": f"ssh -p {dev_port} root@{JUMP_HOST}",
-            "ssh_env": f"ssh -p {env_port} user@{JUMP_HOST}"
+            "ssh_dev": ssh_dev_cmd,
+            "ssh_env": ssh_env_cmd
         }
     finally:
         client.close()
