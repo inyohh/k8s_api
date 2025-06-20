@@ -2,11 +2,11 @@ import io
 import re
 import yaml
 import paramiko
-from fastapi import APIRouter, HTTPException, Form, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
-from typing import Optional, List, Tuple
-from .device_database import update_to_mysql
-from datetime import datetime
+from typing import Optional
+from .device_database import update_usage_info
+from .monitor import check_and_update_bench_status
 
 router = APIRouter(prefix="/v1alpha1/remote", tags=["RemoteOps"])
 
@@ -96,7 +96,7 @@ def clean_mode(req: DeviceRequest = Body(...)):
     finally:
         client.close()
     # 写入数据库，包含clean所有信息
-    update_to_mysql(
+    update_usage_info(
         device_name=req.device,
         userinfo=None,
         usage_info=None,
@@ -169,7 +169,7 @@ def ssh_to_dev(
         ssh_dev_cmd = f"ssh -p {dev_port} root@{JUMP_HOST}"
         # 写入数据库，包含所有ssh信息
         connect_info = f"ssh_dev: {ssh_dev_cmd}"
-        update_to_mysql(
+        update_usage_info(
             device_name=req.device,
             userinfo=req.userinfo,
             usage_info="dev直连环境",
@@ -219,7 +219,7 @@ def ssh_to_env(
         ssh_env_cmd = f"ssh -p {env_port} user@{JUMP_HOST}"
         # 写入数据库，包含所有ssh信息
         connect_info = f"ssh_dev: {ssh_dev_cmd}; ssh_env: {ssh_env_cmd}"
-        update_to_mysql(
+        update_usage_info(
             device_name=req.device,
             userinfo=req.userinfo,
             usage_info="env直连环境",
@@ -232,3 +232,11 @@ def ssh_to_env(
         }
     finally:
         client.close()
+
+@router.post("/sync_bench_status")
+def sync_bench_status(req: DeviceRequest = Body(...)):
+    """
+    sync_bench_status
+    """
+    result = check_and_update_bench_status(req.device)
+    return {"result": result}
