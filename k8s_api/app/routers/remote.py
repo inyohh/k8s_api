@@ -233,10 +233,33 @@ def ssh_to_env(
     finally:
         client.close()
 
-@router.post("/sync_device_status")
-def sync_device_status(req: DeviceRequest = Body(...)):
+@router.post("/sync_devices_status")
+def sync_devices_status():
     """
-    sync_bench_status
+    sync_devices_status
     """
-    result = sync_bench_status(req.device)
-    return {"result": result}
+    client = ssh_connect()
+    cfg_path = f"{WORKDIR}/devices_monitor.csv"
+    results = []
+    try:
+        # 读取 CSV 文件内容
+        sftp = client.open_sftp()
+        with sftp.file(cfg_path, "r") as f:
+            lines = f.readlines()
+        sftp.close()
+
+        # 逐行处理，第一列为设备名
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            device = line.split(",")[0].strip()
+            if device:
+                try:
+                    res = sync_bench_status(device)
+                except Exception as e:
+                    res = {"device": device, "error": str(e)}
+                results.append(res)
+    finally:
+        client.close()
+    return {"results": results}
