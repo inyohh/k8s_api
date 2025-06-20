@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from typing import Optional
 from .device_database import update_usage_info
-from .monitor import check_and_update_bench_status
+from .monitor import sync_bench_status
 
 router = APIRouter(prefix="/v1alpha1/remote", tags=["RemoteOps"])
 
@@ -233,10 +233,10 @@ def ssh_to_env(
     finally:
         client.close()
 
-@router.post("/sync_bench_status")
-def sync_bench_status(req: DeviceRequest = Body(...)):
+@router.post("/sync_device_status")
+def sync_device_status(req: DeviceRequest = Body(...)):
     """
     sync_bench_status
     """
-    result = check_and_update_bench_status(req.device)
+    result = sync_bench_status(req.device)
     return {"result": result}

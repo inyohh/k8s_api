@@ -2,7 +2,7 @@ import requests
 import logging
 from .device_database import get_bench_status, update_bench_status
 
-PROMETHEUS_URL = "http://<prometheus_host>:9090/api/v1/query"  # 替换为你的Prometheus地址
+PROMETHEUS_URL = "http://10.64.243.100:30090/api/v1/query"  # 标准API路径
 MODULE = "icmp"
 TARGET_IP = "192.168.195.3"
 
@@ -10,8 +10,9 @@ def fetch_probe_success(device: str) -> int:
     """从 Prometheus 查询 probe_success 值，返回 0 或 1"""
     query = f'probe_success{{device="{device}",module="{MODULE}",target="{TARGET_IP}"}}'
     try:
-        resp = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=5)
+        resp = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=3)
         resp.raise_for_status()
+        print("Prometheus response:", resp.text)  # 调试用
         data = resp.json()
         results = data.get("data", {}).get("result", [])
         if not results:
@@ -30,7 +31,7 @@ def sync_bench_status(device: str) -> dict:
     """
     try:
         probe = fetch_probe_success(device)
-        new_status = "online" if probe == 1 else "offline"
+        new_status = 1 if probe == 1 else 0  # 用整数
     except Exception as e:
         return {"device": device, "error": str(e)}
 
