@@ -5,6 +5,7 @@ from routers import webapps
 from routers import databases
 from routers import jobs
 from routers import remote
+from routers import admission_webhook
 from fastapi.middleware.cors import CORSMiddleware
 
 # ---------- 初始化 K8s 配置 ----------
@@ -29,6 +30,7 @@ app.include_router(jobs.router)
 app.include_router(webapps.router)
 app.include_router(databases.router)
 app.include_router(remote.router)
+app.include_router(admission_webhook.router)
 
 # ---------- 启动 Uvicorn ----------
 if __name__ == "__main__":

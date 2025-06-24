@@ -71,7 +71,7 @@ class DeviceMoreInfoRequest(DeviceDurationRequest):
     userinfo: Optional[str] = Field("", description="用户信息")
 
 class EnvConfig(BaseModel):
-    cpu:     int    = Field(..., ge=1, description="CPU 数量")
+    cpu:     float  = Field(0.5, description="CPU 数量")
     memory:  int    = Field(..., ge=1, description="内存（GiB）")
     storage: int    = Field(..., ge=100, description="存储（GiB）")
     image:   str    = Field("harbor-adas.byd.com/byd-image/software/infra/device-tools:ubuntu-22-1.0.2", description="容器镜像")
@@ -193,8 +193,6 @@ def ssh_to_env(
     client = ssh_connect()
     try:
         # 1) 写入 config_<device>.yaml
-        cfg_path = f"{WORKDIR}/config_{req.device.lower()}.yaml"
-        yaml_text = yaml.safe_dump(req.env_config.dict(), sort_keys=False)
         sftp = client.open_sftp()
         with sftp.file(cfg_path, "w") as f:
             f.write(yaml_text)
