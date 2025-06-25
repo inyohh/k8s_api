@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from .device_database import update_usage_info
 from .monitor import sync_bench_status
+from kubernetes import client, config
 
 router = APIRouter(prefix="/v1alpha1/remote", tags=["RemoteOps"])
 
@@ -58,6 +59,36 @@ def get_nodeport(client: paramiko.SSHClient, svc_name: str) -> str:
     if code != 0 or not out.isdigit():
         raise HTTPException(500, f"获取 NodePort 失败: {err or out}")
     return out
+
+def get_pod_node_ip(svc_name: str, namespace: str = KUBE_NS) -> str:
+    """
+    通过 svc 名查找对应 Pod 的节点 IP
+    """
+    try:
+        config.load_incluster_config()
+    except Exception:
+        config.load_kube_config()
+    v1 = client.CoreV1Api()
+    # 先查 svc 的 selector
+    svc = v1.read_namespaced_service(svc_name, namespace)
+    selector = svc.spec.selector
+    if not selector:
+        raise HTTPException(500, f"Service {svc_name} 没有 selector")
+    # 拼接 label selector
+    label_selector = ",".join([f"{k}={v}" for k, v in selector.items()])
+    pods = v1.list_namespaced_pod(namespace, label_selector=label_selector).items
+    if not pods:
+        raise HTTPException(500, f"未找到 {svc_name} 对应的 Pod")
+    # 取第一个 Pod 的 nodeName
+    node_name = pods[0].spec.node_name
+    if not node_name:
+        raise HTTPException(500, f"Pod 未调度到节点")
+    # 查节点 IP
+    node = v1.read_node(node_name)
+    for addr in node.status.addresses:
+        if addr.type == "InternalIP":
+            return addr.address
+    raise HTTPException(500, f"未找到节点 {node_name} 的 InternalIP")
 
 # ---------- Env 配置结构体定义 ----------
 
@@ -198,36 +229,85 @@ def ssh_to_env(
             f.write(yaml_text)
         sftp.close()
 
-        # 2) 执行脚本
-        cmd = f"{SCRIPT} {req.device} ssh_env"
-        if req.duration:
-            cmd += f" {req.duration}"
-        code, out, err = run_remote_command(client, cmd)
-
-        # 3) 判断退出码
-        if code != 0:
-            raise HTTPException(500, f"Failed (exit {code}): {err or out}")
-
-        # 4) 获取 dev 与 env 的 NodePort
-        dev_svc = f"{req.device.lower()}-dc-proxy-svc"
-        env_svc = f"{req.device.lower()}-env-svc"
-        dev_port = get_nodeport(client, dev_svc)
-        env_port = get_nodeport(client, env_svc)
-        ssh_dev_cmd = f"ssh -p {dev_port} root@{JUMP_HOST}"
-        ssh_env_cmd = f"ssh -p {env_port} user@{JUMP_HOST}"
-        # 写入数据库，包含所有ssh信息
-        connect_info = f"ssh_dev: {ssh_dev_cmd}; ssh_env: {ssh_env_cmd}"
-        update_usage_info(
-            device_name=req.device,
-            userinfo=req.userinfo,
-            usage_info="env直连环境",
-            environment_purpose=req.env_config.purpose,
-            connect_info=connect_info
-        )
-        return {
-            "ssh_dev": ssh_dev_cmd,
-            "ssh_env": ssh_env_cmd
+        # 5) AdmissionReview 校验
+        import requests
+        admission_review = {
+            "apiVersion": "admission.k8s.io/v1",
+            "kind": "AdmissionReview",
+            "request": {
+                "uid": "ssh-env-" + req.device,
+                "kind": {"group":"", "version":"v1", "kind":"Pod"},
+                "resource": {"group":"", "version":"v1", "resource":"pods"},
+                "object": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": req.device + "-env",
+                                "image": req.env_config.image,
+                                "resources": {
+                                    "requests": {
+                                        "cpu": f"{req.env_config.cpu}",
+                                        "memory": f"{req.env_config.memory}Gi"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
         }
+
+        try:
+            resp = requests.post(
+                "http://localhost:65516/admission/validate",
+                json=admission_review,
+                timeout=5
+            )
+            resp.raise_for_status()
+            review_resp = resp.json().get("response", {})
+            allowed = review_resp.get("allowed", False)
+            message = review_resp.get("status", {}).get("message", "")
+        except Exception as e:
+            # Webhook 调用失败，记录日志后默认拒绝
+            allowed = False
+            message = f"AdmissionWebhook 调用异常: {e}"
+
+        if allowed:
+            # 2) 执行脚本
+            cmd = f"{SCRIPT} {req.device} ssh_env"
+            if req.duration:
+                cmd += f" {req.duration}"
+            code, out, err = run_remote_command(client, cmd)
+
+            # 3) 判断退出码
+            if code != 0:
+                raise HTTPException(500, f"Failed (exit {code}): {err or out}")
+
+            # 4) 获取 dev 与 env 的 NodePort
+            dev_svc = f"{req.device.lower()}-dc-proxy-svc"
+            env_svc = f"{req.device.lower()}-env-svc"
+            dev_port = get_nodeport(client, dev_svc)
+            env_port = get_nodeport(client, env_svc)
+            # 在 ssh_to_env 里替换 JUMP_HOST
+            dev_node_ip = get_pod_node_ip(dev_svc)
+            env_node_ip = get_pod_node_ip(env_svc)
+            ssh_dev_cmd = f"ssh -p {dev_port} root@{dev_node_ip}"
+            ssh_env_cmd = f"ssh -p {env_port} user@{env_node_ip}"
+            # 写入数据库，包含所有ssh信息
+            connect_info = f"ssh_dev: {ssh_dev_cmd}; ssh_env: {ssh_env_cmd}"
+            update_usage_info(
+                device_name=req.device,
+                userinfo=req.userinfo,
+                usage_info="env直连环境",
+                environment_purpose=req.env_config.purpose,
+                connect_info=connect_info
+            )
+            return {
+                "ssh_dev": ssh_dev_cmd,
+                "ssh_env": ssh_env_cmd
+            }
+        else:
+            raise HTTPException(403, f"Failed: {message}")
     finally:
         client.close()
 

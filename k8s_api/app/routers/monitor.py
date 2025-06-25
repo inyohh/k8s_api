@@ -12,7 +12,7 @@ def fetch_probe_success(device: str) -> int:
     try:
         resp = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=3)
         resp.raise_for_status()
-        print("Prometheus response:", resp.text)  # 调试用
+        # print("Prometheus response:", resp.text)  # 调试用
         data = resp.json()
         results = data.get("data", {}).get("result", [])
         if not results:
