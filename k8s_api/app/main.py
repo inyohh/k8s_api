@@ -14,7 +14,8 @@ load_kube_config()
 # ---------- FastAPI 应用 ----------
 app = FastAPI(
     title="Cluster Control API (K8s Edition)",
-    version="v1alpha1"
+    version="v1alpha1",
+    docs_url="/control"
 )
 
 # 若有前端跨域需求：
